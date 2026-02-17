@@ -191,6 +191,49 @@ func (db *MongoClient) DeleteSongByID(songID uint32) error {
 	return nil
 }
 
+func (db *MongoClient) GetAllSongs() ([]SongWithID, error) {
+	collection := db.client.Database("song-recognition").Collection("songs")
+	cursor, err := collection.Find(context.Background(), bson.D{})
+	if err != nil {
+		return nil, fmt.Errorf("error querying songs: %v", err)
+	}
+	defer cursor.Close(context.Background())
+
+	var songs []SongWithID
+	for cursor.Next(context.Background()) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("error decoding song: %v", err)
+		}
+		key, _ := doc["key"].(string)
+		parts := strings.Split(key, "---")
+		title := parts[0]
+		artist := ""
+		if len(parts) > 1 {
+			artist = parts[1]
+		}
+		songs = append(songs, SongWithID{
+			ID:     uint32(doc["_id"].(int64)),
+			Title:  title,
+			Artist: artist,
+		})
+	}
+	return songs, nil
+}
+
+func (db *MongoClient) TotalFingerprints() (int, error) {
+	collection := db.client.Database("song-recognition").Collection("fingerprints")
+	count, err := collection.CountDocuments(context.Background(), bson.D{})
+	if err != nil {
+		return 0, fmt.Errorf("error counting fingerprints: %v", err)
+	}
+	return int(count), nil
+}
+
+func (db *MongoClient) CountFingerprintsForSong(_ uint32) (int, error) {
+	return 0, nil
+}
+
 func (db *MongoClient) DeleteCollection(collectionName string) error {
 	collection := db.client.Database("song-recognition").Collection(collectionName)
 	err := collection.Drop(context.Background())

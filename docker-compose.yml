@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 volumes:
   seek-tune-db:
@@ -13,9 +13,9 @@ services:
     image: seek-tune:latest
     container_name: seek-tune-app
     restart: unless-stopped
-    
+
     ports:
-      - "${HOST_PORT:-8080}:5000"
+      - "${HOST_PORT:-8099}:5000"
 
     environment:
       DB_TYPE: ${DB_TYPE:-sqlite}
@@ -24,10 +24,10 @@ services:
       DB_NAME: ${DB_NAME:-seek_tune_db}
       DB_HOST: ${DB_HOST:-localhost}
       DB_PORT: ${DB_PORT:-27017}
-      
+
       ENV: production
-      REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8080}
-      
+      REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8099}
+
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
 
@@ -35,7 +35,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8080}
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8099}
       cache_from:
         - seek-tune:latest
 
@@ -45,24 +45,32 @@ services:
       - seek-tune-recordings:/app/recordings
       # Optional: Mount local songs directory for development
       # - ./server/songs:/app/songs
-    
-    # Resource limits (adjust based on your needs)
+
+    # chunked processing keeps memory bounded regardless of file length
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: "2.0"
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
-    
+
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:5000/",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-    
+
     logging:
       driver: "json-file"
       options:

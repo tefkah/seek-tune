@@ -1,343 +1,210 @@
-import React, { useEffect, useState, useRef } from "react";
-import io from "socket.io-client";
-import Form from "./components/Form";
-import Listen from "./components/Listen";
-import CarouselSliders from "./components/CarouselSliders";
-import { FaMicrophoneLines } from "react-icons/fa6";
-import { LiaLaptopSolid } from "react-icons/lia";
+import { useEffect, useState, useCallback } from "react";
 import { ToastContainer, toast, Slide } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { MediaRecorder, register } from "extendable-media-recorder";
-import { connect } from "extendable-media-recorder-wav-encoder";
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
 
-
-import AnimatedNumber from "./components/AnimatedNumber";
-
-const server = process.env.REACT_APP_BACKEND_URL || "http://localhost:5500";
-const recordStereo = process.env.REACT_APP_RECORD_STEREO === "true" || false;
-// https://seek-tune-rq4gn.ondigitalocean.app/
-
-var socket = io(server);
+const server = process.env.REACT_APP_BACKEND_URL || "http://localhost:5000";
 
 function App() {
-  let ffmpegLoaded = false;
-  const ffmpeg = new FFmpeg();
-  const uploadRecording = true
-  const isPhone = window.innerWidth <= 550
-  const [stream, setStream] = useState();
+  const [stats, setStats] = useState({ totalEntries: 0, totalFingerprints: 0, storageEstimate: "0 B" });
+  const [indexFile, setIndexFile] = useState(null);
+  const [matchFile, setMatchFile] = useState(null);
+  const [title, setTitle] = useState("");
+  const [author, setAuthor] = useState("");
   const [matches, setMatches] = useState([]);
-  const [totalSongs, setTotalSongs] = useState(10);
-  const [isListening, setisListening] = useState(false);
-  const [audioInput, setAudioInput] = useState("device"); // or "mic"
-  const [genFingerprint, setGenFingerprint] = useState(null);
-  const [registeredMediaEncoder, setRegisteredMediaEncoder] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [lastIndex, setLastIndex] = useState(null);
 
-  const streamRef = useRef(stream);
-  let sendRecordingRef = useRef(true);
-
-  useEffect(() => {
-    streamRef.current = stream;
-  }, [stream]);
+  const fetchStats = useCallback(() => {
+    fetch(`${server}/api/stats`)
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
-    if (isPhone) {
-      setAudioInput("mic");
+    fetchStats();
+    const id = setInterval(fetchStats, 10000);
+    return () => clearInterval(id);
+  }, [fetchStats]);
+
+  async function handleIndex(e) {
+    e.preventDefault();
+    if (!indexFile) {
+      toast.error("select a file to index");
+      return;
     }
 
-    socket.on("connect", () => {
-      socket.emit("totalSongs", "");
-    });
+    setIndexing(true);
+    setLastIndex(null);
 
-    socket.on("matches", (matches) => {
-      matches = JSON.parse(matches);
-      if (matches) {
-        setMatches(matches.slice(0, 5));
-        console.log("Matches: ", matches);
-      } else {
-        toast("No song found.");
-      }
+    const form = new FormData();
+    form.append("file", indexFile);
+    if (title) form.append("title", title);
+    if (author) form.append("author", author);
 
-      cleanUp();
-    });
-
-    socket.on("downloadStatus", (msg) => {
-      msg = JSON.parse(msg);
-      const msgTypes = ["info", "success", "error"];
-      if (msg.type !== undefined && msgTypes.includes(msg.type)) {
-        toast[msg.type](() => <div>{msg.message}</div>);
-      } else {
-        toast(msg.message);
-      }
-    });
-
-    socket.on("totalSongs", (songsCount) => {
-      setTotalSongs(songsCount);
-    });
-  }, []);
-
-  useEffect(() => {
-    const emitTotalSongs = () => {
-      socket.emit("totalSongs", "");
-    };
-
-    const intervalId = setInterval(emitTotalSongs, 8000);
-
-    return () => clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => { 
-    (async () => {
-      try {
-        const go = new window.Go();
-        const result = await WebAssembly.instantiateStreaming(
-          fetch("/fingerprint.wasm"), 
-          go.importObject
-        );
-        go.run(result.instance);
-
-        if (typeof window.generateFingerprint === "function") {
-          setGenFingerprint(() => window.generateFingerprint);
-        }
-
-      } catch (error) {
-        console.error("Error loading WASM:", error);
-      }
-    })();
-  }, []);
-
-  async function record() {
     try {
-      if (!genFingerprint) {
-        console.error("WASM is not loaded yet.");
+      const resp = await fetch(`${server}/api/index`, { method: "POST", body: form });
+      const data = await resp.json();
+      if (!resp.ok) {
+        toast.error(data.error || "indexing failed");
         return;
       }
-
-      if (!ffmpegLoaded) {
-        await ffmpeg.load();
-        ffmpegLoaded = true;
-      }
-
-      const mediaDevice =
-        audioInput === "device"
-          ? navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
-          : navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-
-      if (!registeredMediaEncoder) {
-        await register(await connect());
-        setRegisteredMediaEncoder(true);
-      }
-
-      const constraints = {
-        audio: {
-          autoGainControl: false,
-          channelCount: 1,
-          echoCancellation: false,
-          noiseSuppression: false,
-          sampleSize: 16,
-        },
-      };
-
-      const stream = await mediaDevice(constraints);
-      const audioTracks = stream.getAudioTracks();
-      const audioStream = new MediaStream(audioTracks);
-
-      setStream(audioStream);
-
-      audioTracks[0].onended = stopListening;
-
-      // Stop video tracks
-      for (const track of stream.getVideoTracks()) {
-        track.stop();
-      }
-
-      const mediaRecorder = new MediaRecorder(audioStream, {
-        mimeType: "audio/wav",
-      });
-
-      mediaRecorder.start();
-      setisListening(true);
-      sendRecordingRef.current = true;
-
-      const chunks = [];
-      mediaRecorder.ondataavailable = function (e) {
-        chunks.push(e.data);
-      };
-
-      // Stop recording after 20 seconds
-      setTimeout(function () {
-        mediaRecorder.stop();
-      }, 20000);
-
-      mediaRecorder.addEventListener("stop", async () => {
-        const blob = new Blob(chunks, { type: "audio/wav" });
-
-        cleanUp();
-
-        const inputFile = 'input.wav';
-        const outputFile = 'output_formatted.wav';
-
-        await ffmpeg.writeFile(inputFile, await fetchFile(blob))
-        const exitCode = await ffmpeg.exec([
-          '-i', inputFile,
-          '-c', 'pcm_s16le',
-          '-ar', '44100',
-          '-ac', recordStereo ? '2' : '1',
-          '-acodec', 'pcm_s16le',
-          '-f', 'wav',
-          outputFile
-        ]);
-        if (exitCode !== 0) {
-          throw new Error(`FFmpeg exec failed with exit code: ${exitCode}`);
-        }
-
-        const audioData = await ffmpeg.readFile(outputFile);
-        const audioBlob = new Blob([audioData.buffer], { type: 'audio/wav' });
-
-        const reader = new FileReader();
-        reader.readAsArrayBuffer(audioBlob);
-        reader.onload = async (event) => {
-          const arrayBuffer = event.target.result;
-          const audioContext = new AudioContext();
-          const arrayBufferCopy = arrayBuffer.slice(0);
-          const audioBufferDecoded = await audioContext.decodeAudioData(arrayBufferCopy);
-          
-          const audioData = audioBufferDecoded.getChannelData(0);
-          const audioArray = Array.from(audioData);
-
-          const result = genFingerprint(
-            audioArray,
-            audioBufferDecoded.sampleRate,
-            audioBufferDecoded.numberOfChannels
-          );
-          if (result.error !== 0) {
-            toast["error"](() => <div>An error occured</div>)
-            console.log("An error occured: ", result)
-            return
-          }
-
-          const fingerprintMap = result.data.reduce((dict, item) => {
-            dict[item.address] = item.anchorTime;
-            return dict;
-          }, {});
-
-          if (sendRecordingRef.current) {
-            socket.emit("newFingerprint", JSON.stringify({ fingerprint: fingerprintMap }));
-          }
-
-          if (uploadRecording) {
-            var bytes = new Uint8Array(arrayBuffer);
-            var rawAudio = "";
-            for (var i = 0; i < bytes.byteLength; i++) {
-              rawAudio += String.fromCharCode(bytes[i]);
-            }
-
-            const dataView = new DataView(arrayBuffer);
-
-            const recordData = {
-              audio: btoa(rawAudio),
-              channels: dataView.getUint16(22, true),
-              sampleRate: dataView.getUint16(24, true),
-              sampleSize: dataView.getUint16(34, true),
-              duration: audioBufferDecoded.duration,
-            };
-
-            console.log("Record data: ", recordData);
-
-            socket.emit("newRecording", JSON.stringify(recordData));
-          }
-        };
-      });
-    } catch (error) {
-      console.error("error:", error);
-      cleanUp();
+      setLastIndex(data);
+      toast.success(`indexed "${data.title}" by "${data.author}"`);
+      setIndexFile(null);
+      setTitle("");
+      setAuthor("");
+      fetchStats();
+    } catch (_) {
+      toast.error("network error");
+    } finally {
+      setIndexing(false);
     }
   }
 
-
-
-  function downloadRecording(blob) {
-    const blobUrl = URL.createObjectURL(blob);
-
-    const downloadLink = document.createElement("a");
-    downloadLink.href = blobUrl;
-    downloadLink.download = "recorded_audio.wav";
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-  }
-
-  function cleanUp() {
-    const currentStream = streamRef.current;
-    if (currentStream) {
-      currentStream.getTracks().forEach((track) => track.stop());
+  async function handleMatch(e) {
+    e.preventDefault();
+    if (!matchFile) {
+      toast.error("select a file to match");
+      return;
     }
 
-    setStream(null);
-    setisListening(false);
-  }
+    setMatching(true);
+    setMatches([]);
 
-  function stopListening() {
-    cleanUp();
-    sendRecordingRef.current = false;
-  }
+    const form = new FormData();
+    form.append("file", matchFile);
 
-  function handleLaptopIconClick() {
-    setAudioInput("device");
-  }
-
-  function handleMicrophoneIconClick() {
-    setAudioInput("mic");
+    try {
+      const resp = await fetch(`${server}/api/match`, { method: "POST", body: form });
+      const data = await resp.json();
+      if (!resp.ok) {
+        toast.error(data.error || "matching failed");
+        return;
+      }
+      if (!data.matches || data.matches.length === 0) {
+        toast.info("no matches found");
+        return;
+      }
+      setMatches(data.matches);
+      toast.success(`found ${data.matches.length} match(es) in ${data.searchTimeMs}ms`);
+    } catch (_) {
+      toast.error("network error");
+    } finally {
+      setMatching(false);
+    }
   }
 
   return (
     <div className="App">
       <div className="TopHeader">
         <h2 style={{ color: "#374151" }}>SeekTune</h2>
-        <h4 style={{ display: "flex", justifyContent: "flex-end" }}>
-          <AnimatedNumber includeComma={true} animateToNumber={totalSongs} />
-          &nbsp;Songs
-        </h4>
-      </div>
-      <div className="listen">
-        <Listen
-          stopListening={stopListening}
-          disable={false}
-          startListening={record}
-          isListening={isListening}
-        />
-      </div>
-      {!isPhone && (
-        <div className="audio-input">
-          <div
-            onClick={handleLaptopIconClick}
-            className={
-              audioInput !== "device"
-                ? "audio-input-device"
-                : "audio-input-device active-audio-input"
-            }
-          >
-            <LiaLaptopSolid style={{ height: 20, width: 20 }} />
-          </div>
-          <div
-            onClick={handleMicrophoneIconClick}
-            className={
-              audioInput !== "mic"
-                ? "audio-input-mic"
-                : "audio-input-mic active-audio-input"
-            }
-          >
-            <FaMicrophoneLines style={{ height: 20, width: 20 }} />
-          </div>
+        <div style={{ textAlign: "right", fontSize: "0.85rem", color: "#6b7280" }}>
+          <div><strong>{stats.totalEntries}</strong> entries indexed</div>
+          <div>{stats.totalFingerprints.toLocaleString()} fingerprints ({stats.storageEstimate})</div>
         </div>
-      )}
-      <div className="youtube">
-        <CarouselSliders matches={matches} />
       </div>
-      <Form socket={socket} toast={toast} />
+
+      <section style={{ marginBottom: "2rem" }}>
+        <h3>Index Audio</h3>
+        <p style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "1rem" }}>
+          Upload an audio file to add it to the fingerprint database. Supports any format ffmpeg can handle.
+        </p>
+        <form onSubmit={handleIndex}>
+          <div style={{ display: "flex", gap: "12px", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+            <input
+              type="text"
+              placeholder="Title (optional, extracted from metadata)"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              style={{ flex: 1, minWidth: "200px" }}
+            />
+            <input
+              type="text"
+              placeholder="Author (optional)"
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              style={{ flex: 1, minWidth: "200px" }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={(e) => setIndexFile(e.target.files[0] || null)}
+              style={{ flex: 1 }}
+            />
+            <button type="submit" disabled={indexing || !indexFile}>
+              {indexing ? "Indexing..." : "Upload & Index"}
+            </button>
+          </div>
+        </form>
+        {lastIndex && (
+          <div style={{
+            marginTop: "1rem",
+            padding: "0.75rem 1rem",
+            background: "#f0fdf4",
+            border: "1px solid #bbf7d0",
+            borderRadius: "4px",
+            fontSize: "0.9rem"
+          }}>
+            <strong>{lastIndex.title}</strong> by {lastIndex.author}
+            <span style={{ marginLeft: "1rem", color: "#6b7280" }}>
+              {lastIndex.fingerprints.toLocaleString()} fingerprints, ~{lastIndex.storageEstimate} in DB
+              {lastIndex.durationSec > 0 && ` (${Math.round(lastIndex.durationSec / 60)} min)`}
+            </span>
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginBottom: "2rem" }}>
+        <h3>Find Matches</h3>
+        <p style={{ color: "#6b7280", fontSize: "0.9rem", marginBottom: "1rem" }}>
+          Upload an audio file to search for matches in the database.
+        </p>
+        <form onSubmit={handleMatch}>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={(e) => setMatchFile(e.target.files[0] || null)}
+              style={{ flex: 1 }}
+            />
+            <button type="submit" disabled={matching || !matchFile}>
+              {matching ? "Matching..." : "Find Matches"}
+            </button>
+          </div>
+        </form>
+        {matches.length > 0 && (
+          <div style={{ marginTop: "1rem" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: "40px" }}>#</th>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th style={{ textAlign: "right" }}>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matches.map((m, i) => (
+                  <tr key={`${m.title}-${m.author}-${m.score}`} style={i === 0 ? { fontWeight: 600 } : {}}>
+                    <td>{i + 1}</td>
+                    <td>{m.title}</td>
+                    <td>{m.author}</td>
+                    <td style={{ textAlign: "right" }}>{m.score.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <ToastContainer
         position="top-center"
-        autoClose={5000}
+        autoClose={4000}
         hideProgressBar={true}
         newestOnTop={false}
         closeOnClick

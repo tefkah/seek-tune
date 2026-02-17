@@ -4,7 +4,7 @@ FROM node:20-alpine AS build_react_stage
 WORKDIR /app/client
 
 COPY client/package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm i --only=production && npm cache clean --force
 
 COPY client/ ./
 ARG REACT_APP_BACKEND_URL
@@ -60,4 +60,4 @@ RUN addgroup -g 1001 -S appuser && \
 
 USER appuser
 
-CMD ["./seek-tune", "serve", "http", "5000"]
+CMD ["./seek-tune", "serve", "-proto", "http", "-p", "5000"]

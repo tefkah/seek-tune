@@ -1,43 +1,20 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"song-recognition/utils"
 
 	"github.com/joho/godotenv"
-	"github.com/mdobak/go-xerrors"
 )
 
 func main() {
-	err := utils.CreateFolder("tmp")
-	if err != nil {
-		logger := utils.GetLogger()
-		err := xerrors.New(err)
-		ctx := context.Background()
-		logger.ErrorContext(ctx, "Failed create tmp dir.", slog.Any("error", err))
-	}
-
-	err = utils.CreateFolder(SONGS_DIR)
-	if err != nil {
-		err := xerrors.New(err)
-		logger := utils.GetLogger()
-		ctx := context.Background()
-		logMsg := fmt.Sprintf("failed to create directory %v", SONGS_DIR)
-		logger.ErrorContext(ctx, logMsg, slog.Any("error", err))
-	}
+	_ = utils.CreateFolder("tmp")
+	_ = utils.CreateFolder(SONGS_DIR)
 
 	if len(os.Args) < 2 {
-		fmt.Println("Expected 'find', 'download', 'erase', 'save', or 'serve' subcommands")
-		fmt.Println("\nUsage examples:")
-		fmt.Println("  find <path_to_wav_file>")
-		fmt.Println("  download <spotify_url>")
-		fmt.Println("  erase [db | all]  (default: db)")
-		fmt.Println("  save [-f|--force] <path_to_file_or_dir>")
-		fmt.Println("  serve [-proto <http|https>] [-p <port>]")
+		printUsage()
 		os.Exit(1)
 	}
 	_ = godotenv.Load()
@@ -45,66 +22,60 @@ func main() {
 	switch os.Args[1] {
 	case "find":
 		if len(os.Args) < 3 {
-			fmt.Println("Usage: main.go find <path_to_wav_file>")
+			fmt.Println("usage: seek-tune find <path_to_audio_file>")
 			os.Exit(1)
 		}
-		filePath := os.Args[2]
-		find(filePath)
-	case "download":
-		if len(os.Args) < 3 {
-			fmt.Println("Usage: main.go download <spotify_url>")
-			os.Exit(1)
-		}
-		url := os.Args[2]
-		download(url)
+		find(os.Args[2])
+
 	case "serve":
 		serveCmd := flag.NewFlagSet("serve", flag.ExitOnError)
-		protocol := serveCmd.String("proto", "http", "Protocol to use (http or https)")
-		port := serveCmd.String("p", "5000", "Port to use")
+		protocol := serveCmd.String("proto", "http", "protocol to use (http or https)")
+		port := serveCmd.String("p", "5000", "port to use")
 		serveCmd.Parse(os.Args[2:])
 		serve(*protocol, *port)
+
 	case "erase":
-		// Default is to clear only database (db mode)
 		dbOnly := true
 		all := false
 
 		if len(os.Args) > 2 {
-			subCmd := os.Args[2]
-			switch subCmd {
+			switch os.Args[2] {
 			case "db":
 				dbOnly = true
-				all = false
 			case "all":
 				dbOnly = false
 				all = true
 			default:
-				fmt.Println("Usage: main.go erase [db | all]")
-				fmt.Println("  db  : only clear the database (default)")
-				fmt.Println("  all : clear database and songs folder")
+				fmt.Println("usage: seek-tune erase [db | all]")
 				os.Exit(1)
 			}
 		}
 
 		erase(SONGS_DIR, dbOnly, all)
+
 	case "save":
 		indexCmd := flag.NewFlagSet("save", flag.ExitOnError)
-		force := indexCmd.Bool("force", false, "save song with or without YouTube ID")
-		indexCmd.BoolVar(force, "f", false, "save song with or without YouTube ID (shorthand)")
+		force := indexCmd.Bool("force", false, "index file even without complete metadata")
+		indexCmd.BoolVar(force, "f", false, "index file even without complete metadata (shorthand)")
 		indexCmd.Parse(os.Args[2:])
 		if indexCmd.NArg() < 1 {
-			fmt.Println("Usage: main.go save [-f|--force] <path_to_wav_file_or_dir>")
+			fmt.Println("usage: seek-tune save [-f|--force] <path_to_file_or_dir>")
 			os.Exit(1)
 		}
-		filePath := indexCmd.Arg(0)
-		save(filePath, *force)
+		save(indexCmd.Arg(0), *force)
+
 	default:
-		fmt.Println("Expected 'find', 'download', 'erase', 'save', or 'serve' subcommands")
-		fmt.Println("\nUsage examples:")
-		fmt.Println("  find <path_to_wav_file>")
-		fmt.Println("  download <spotify_url>")
-		fmt.Println("  erase [db | all]  (default: db)")
-		fmt.Println("  save [-f|--force] <path_to_file_or_dir>")
-		fmt.Println("  serve [-proto <http|https>] [-p <port>]")
+		printUsage()
 		os.Exit(1)
 	}
+}
+
+func printUsage() {
+	fmt.Println("usage: seek-tune <command>")
+	fmt.Println()
+	fmt.Println("commands:")
+	fmt.Println("  find  <audio_file>              match a file against the database")
+	fmt.Println("  save  [-f] <file_or_dir>        index audio file(s) into the database")
+	fmt.Println("  erase [db | all]                clear database (and optionally audio files)")
+	fmt.Println("  serve [-proto http] [-p 5000]    start the web server")
 }

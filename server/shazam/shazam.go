@@ -21,17 +21,16 @@ type Match struct {
 }
 
 // FindMatches analyzes the audio sample to find matching songs in the database.
-func FindMatches(audioSample []float64, audioDuration float64, sampleRate int) ([]Match, time.Duration, error) {
+func FindMatches(audioSample []float64, audioDuration float64, sampleRate int, cfg FingerprintConfig) ([]Match, time.Duration, error) {
 	startTime := time.Now()
 
-	spectrogram, err := Spectrogram(audioSample, sampleRate)
+	spectrogram, err := Spectrogram(audioSample, sampleRate, cfg)
 	if err != nil {
 		return nil, time.Since(startTime), fmt.Errorf("failed to get spectrogram of samples: %v", err)
 	}
 
-	peaks := ExtractPeaks(spectrogram, audioDuration, sampleRate)
-	// peaks := ExtractPeaksLMX(spectrogram, true)
-	sampleFingerprint := Fingerprint(peaks, utils.GenerateUniqueID())
+	peaks := ExtractPeaks(spectrogram, audioDuration, sampleRate, cfg)
+	sampleFingerprint := Fingerprint(peaks, utils.GenerateUniqueID(), cfg)
 
 	sampleFingerprintMap := make(map[uint32]uint32)
 	for address, couple := range sampleFingerprint {
@@ -86,8 +85,6 @@ func FindMatchesFGP(sampleFingerprint map[uint32]uint32) ([]Match, time.Duration
 		}
 	}
 
-	// matches = filterMatches(10, matches, targetZones)
-
 	scores := analyzeRelativeTiming(matches)
 
 	var matchList []Match
@@ -118,11 +115,10 @@ func FindMatchesFGP(sampleFingerprint map[uint32]uint32) ([]Match, time.Duration
 // target zones to meet the specified threshold
 func filterMatches(
 	threshold int,
+	targetZoneSize int,
 	matches map[uint32][][2]uint32,
 	targetZones map[uint32]map[uint32]int) map[uint32][][2]uint32 {
 
-	// Filter out non target zones.
-	// When a target zone has less than `targetZoneSize` anchor times, it is not considered a target zone.
 	for songID, anchorTimes := range targetZones {
 		for anchorTime, count := range anchorTimes {
 			if count < targetZoneSize {
@@ -154,7 +150,7 @@ func analyzeRelativeTiming(matches map[uint32][][2]uint32) map[uint32]float64 {
 			dbTime := int32(timePair[1])
 			offset := dbTime - sampleTime
 
-			// Bin offsets in 100ms buckets to allow for small timing variations
+			// bin offsets in 100ms buckets to allow for small timing variations
 			offsetBucket := offset / 100
 			offsetCounts[offsetBucket]++
 		}

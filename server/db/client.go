@@ -11,11 +11,14 @@ type DBClient interface {
 	StoreFingerprints(fingerprints map[uint32]models.Couple) error
 	GetCouples(addresses []uint32) (map[uint32][]models.Couple, error)
 	TotalSongs() (int, error)
+	TotalFingerprints() (int, error)
 	RegisterSong(songTitle, songArtist, ytID string) (uint32, error)
 	GetSong(filterKey string, value interface{}) (Song, bool, error)
 	GetSongByID(songID uint32) (Song, bool, error)
 	GetSongByYTID(ytID string) (Song, bool, error)
 	GetSongByKey(key string) (Song, bool, error)
+	GetAllSongs() ([]SongWithID, error)
+	CountFingerprintsForSong(songID uint32) (int, error)
 	DeleteSongByID(songID uint32) error
 	DeleteCollection(collectionName string) error
 }
@@ -24,6 +27,12 @@ type Song struct {
 	Title     string
 	Artist    string
 	YouTubeID string
+}
+
+type SongWithID struct {
+	ID     uint32
+	Title  string
+	Artist string
 }
 
 var DBtype = utils.GetEnv("DB_TYPE", "sqlite") // Can be "sqlite" or "mongo"

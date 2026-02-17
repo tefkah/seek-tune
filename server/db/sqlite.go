@@ -211,6 +211,42 @@ func (db *SQLiteClient) DeleteSongByID(songID uint32) error {
 	return nil
 }
 
+func (db *SQLiteClient) GetAllSongs() ([]SongWithID, error) {
+	rows, err := db.db.Query("SELECT id, title, artist FROM songs ORDER BY id")
+	if err != nil {
+		return nil, fmt.Errorf("error querying songs: %s", err)
+	}
+	defer rows.Close()
+
+	var songs []SongWithID
+	for rows.Next() {
+		var s SongWithID
+		if err := rows.Scan(&s.ID, &s.Title, &s.Artist); err != nil {
+			return nil, fmt.Errorf("error scanning song row: %s", err)
+		}
+		songs = append(songs, s)
+	}
+	return songs, nil
+}
+
+func (db *SQLiteClient) TotalFingerprints() (int, error) {
+	var count int
+	err := db.db.QueryRow("SELECT COUNT(*) FROM fingerprints").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error counting fingerprints: %s", err)
+	}
+	return count, nil
+}
+
+func (db *SQLiteClient) CountFingerprintsForSong(songID uint32) (int, error) {
+	var count int
+	err := db.db.QueryRow("SELECT COUNT(*) FROM fingerprints WHERE songID = ?", songID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error counting fingerprints for song: %s", err)
+	}
+	return count, nil
+}
+
 // DeleteCollection deletes a collection (table) from the database
 func (db *SQLiteClient) DeleteCollection(collectionName string) error {
 	_, err := db.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", collectionName))

@@ -8,6 +8,7 @@ import (
 	"song-recognition/utils"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ConvertToWAV converts an input audio file to WAV format with specified channels.
@@ -90,4 +91,52 @@ func ReformatWAV(inputFilePath string, channels int) (reformatedFilePath string,
 	}
 
 	return outputFile, nil
+}
+
+// ExtractChunkAsWAV uses ffmpeg to extract a time segment from any audio
+// file and write it as a 16-bit PCM mono WAV. the result is a small
+// temporary file bounded by durationSec regardless of original file size.
+func ExtractChunkAsWAV(inputPath string, startSec, durationSec float64) (string, error) {
+	if err := utils.CreateFolder("tmp"); err != nil {
+		return "", err
+	}
+
+	outputFile := filepath.Join("tmp", fmt.Sprintf("chunk_%d_%.0f.wav", time.Now().UnixNano(), startSec))
+
+	cmd := exec.Command(
+		"ffmpeg", "-y",
+		"-ss", fmt.Sprintf("%.3f", startSec),
+		"-t", fmt.Sprintf("%.3f", durationSec),
+		"-i", inputPath,
+		"-c", "pcm_s16le",
+		"-ar", "44100",
+		"-ac", "1",
+		outputFile,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg chunk extraction failed: %v, output: %s", err, output)
+	}
+
+	return outputFile, nil
+}
+
+// GetAudioDuration returns the duration in seconds of any audio file
+// by calling ffprobe.
+func GetAudioDuration(inputPath string) (float64, error) {
+	cmd := exec.Command(
+		"ffprobe",
+		"-v", "quiet",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		inputPath,
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe duration query failed: %v", err)
+	}
+
+	return strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
 }
